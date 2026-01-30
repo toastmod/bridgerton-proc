@@ -1,6 +1,6 @@
-use syn::{Ident, Type, parse_quote, token::RArrow};
+use syn::{Attribute, Ident, Stmt, Type, parse_quote, token::RArrow};
 use proc_macro::TokenStream;
-use quote::{quote};
+use quote::{ToTokens, quote};
 #[cfg(not(target_arch = "wasm32"))]
 use syn::{ImplItem, Item, ItemImpl};
 
@@ -39,10 +39,11 @@ pub fn bindimpl(_attr: TokenStream, input: TokenStream) -> TokenStream {
             } 
 
             // getter handler
+            let target_attr = "bindget";
             if f.attrs.iter().any(|a| {
-                a.path().is_ident("bindget")
+                a.path().is_ident(target_attr)
             }) {
-                let args = f.attrs.extract_if(..,|a| a.path().is_ident("constructor")).next().unwrap().parse_args::<Ident>().unwrap();
+                let args = f.attrs.extract_if(..,|a| a.path().is_ident(target_attr)).next().unwrap().parse_args::<Ident>().unwrap();
 
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -70,10 +71,11 @@ pub fn bindimpl(_attr: TokenStream, input: TokenStream) -> TokenStream {
             } 
 
             // setter handler
+            let target_attr = "bindset";
             if f.attrs.iter().any(|a| {
-                a.path().is_ident("bindset")
+                a.path().is_ident(target_attr)
             }) {
-                let arg = f.attrs.extract_if(..,|a| a.path().is_ident("bindset")).next().unwrap().parse_args::<Ident>().unwrap();
+                let arg = f.attrs.extract_if(..,|a| a.path().is_ident(target_attr)).next().unwrap().parse_args::<Ident>().unwrap();
 
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -90,14 +92,28 @@ pub fn bindimpl(_attr: TokenStream, input: TokenStream) -> TokenStream {
     
                     f.sig.output = syn::ReturnType::Type(RArrow::default(), Box::new(fixed_return as Type));
                     f.attrs.push(parse_quote!(
-                        #[getter]
+                        #[setter]
                     ));
                 }
 
                 #[cfg(target_arch = "wasm32")]
-                f.attrs.push(parse_quote!(
-                    #[wasm_bindgen(setter = #arg)]
-                ));
+                {
+                    let fixed_return: Type = match &f.sig.output {
+                        syn::ReturnType::Default => {
+    
+                            parse_quote! {Result<(), JsValue>}
+                        },
+                        syn::ReturnType::Type(_, ty) => {
+                            let ty = ty.clone();
+                            parse_quote!{Result<#ty, JsValue>}
+                        },
+                    };
+    
+                    f.sig.output = syn::ReturnType::Type(RArrow::default(), Box::new(fixed_return as Type));
+                    f.attrs.push(parse_quote!(
+                        #[wasm_bindgen(setter = #arg)]
+                    ));
+                }
             } 
 
         }
