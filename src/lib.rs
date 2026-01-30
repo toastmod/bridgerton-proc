@@ -1,10 +1,8 @@
-use syn::parse_quote;
+use syn::{Ident, Type, parse_quote, token::RArrow};
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{quote};
 #[cfg(not(target_arch = "wasm32"))]
-use syn::parse_str;
 use syn::{ImplItem, Item, ItemImpl};
-
 
 #[proc_macro_attribute]
 pub fn bindclass(_attr: TokenStream, input: TokenStream) -> TokenStream {
@@ -20,36 +18,90 @@ pub fn bindclass(_attr: TokenStream, input: TokenStream) -> TokenStream {
 pub fn bindimpl(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let mut input_impl = syn::parse_macro_input!(input as ItemImpl);
 
-    #[cfg(not(target_arch = "wasm32"))]
     for i in &mut input_impl.items {
         if let ImplItem::Fn(f) = i {
 
+            // Constructor handler
             if f.attrs.iter().any(|a| {
                 a.path().is_ident("constructor")
             }) {
                 f.attrs.retain(|a| !a.path().is_ident("constructor"));
+
+                #[cfg(not(target_arch = "wasm32"))]
                 f.attrs.push(parse_quote!(
                     #[new]
                 ));
-            } 
 
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    for i in &mut input_impl.items {
-        if let ImplItem::Fn(f) = i {
-
-            if f.attrs.iter().any(|a| {
-                a.path().is_ident("constructor")
-            }) {
-                f.attrs.retain(|a| !a.path().is_ident("constructor"));
+                #[cfg(target_arch = "wasm32")]
                 f.attrs.push(parse_quote!(
                     #[wasm_bindgen(constructor)]
                 ));
             } 
 
+            // getter handler
+            if f.attrs.iter().any(|a| {
+                a.path().is_ident("bindget")
+            }) {
+                let args = f.attrs.extract_if(..,|a| a.path().is_ident("constructor")).next().unwrap().parse_args::<Ident>().unwrap();
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let fixed_return: Type = match &f.sig.output {
+                        syn::ReturnType::Default => {
+    
+                            parse_quote! {PyResult<()>}
+                        },
+                        syn::ReturnType::Type(_, ty) => {
+                            let ty = ty.clone();
+                            parse_quote!{PyResult<#ty>}
+                        },
+                    };
+    
+                    f.sig.output = syn::ReturnType::Type(RArrow::default(), Box::new(fixed_return as Type));
+                    f.attrs.push(parse_quote!(
+                        #[getter]
+                    ));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                f.attrs.push(parse_quote!(
+                    #[wasm_bindgen(getter = #arg)]
+                ));
+            } 
+
+            // setter handler
+            if f.attrs.iter().any(|a| {
+                a.path().is_ident("bindset")
+            }) {
+                let arg = f.attrs.extract_if(..,|a| a.path().is_ident("bindset")).next().unwrap().parse_args::<Ident>().unwrap();
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let fixed_return: Type = match &f.sig.output {
+                        syn::ReturnType::Default => {
+    
+                            parse_quote! {PyResult<()>}
+                        },
+                        syn::ReturnType::Type(_, ty) => {
+                            let ty = ty.clone();
+                            parse_quote!{PyResult<#ty>}
+                        },
+                    };
+    
+                    f.sig.output = syn::ReturnType::Type(RArrow::default(), Box::new(fixed_return as Type));
+                    f.attrs.push(parse_quote!(
+                        #[getter]
+                    ));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                f.attrs.push(parse_quote!(
+                    #[wasm_bindgen(setter = #arg)]
+                ));
+            } 
+
         }
+
     }
 
     TokenStream::from(quote!{
